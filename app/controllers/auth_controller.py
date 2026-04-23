@@ -31,3 +31,12 @@ class AuthController:
             }, 200
         
         return {"error": "Invalid email or password"}, 401
+    
+    def refresh_token(id):
+        user = User.query.get(id)
+        access_token = create_access_token(identity=str(user.id), additional_claims={"role": user.role})
+        return {
+            "access_token": access_token,
+            "user": user.to_dict()
+        }, 200
+        
