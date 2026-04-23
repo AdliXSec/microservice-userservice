@@ -46,6 +46,15 @@ def delete_user(user_id):
         return jsonify(response("berhasil", "Data berhasil dihapus", None)), 200 
     return jsonify(response("error", "Data tidak ditemukan", None)), 404
 
+@user_bp.route('/is_login', methods=['GET'])
+@jwt_required()
+def is_login():
+    user_id = get_jwt().get("sub")
+    user = UserController.get_user_by_id(user_id)
+    if user:
+        return jsonify(response("berhasil", "Data berhasil diambil", user)), 200
+    return jsonify(response("error", "Data tidak ditemukan", None)), 404
+    
 # @user_bp.route('/users', methods=['POST'])
 # def create_user():
 #     data = request.get_json()
