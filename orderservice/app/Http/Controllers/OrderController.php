@@ -6,23 +6,40 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Http;
 use App\Models\Order;
 use App\Http\Resources\OrderResource;
+use Illuminate\Support\Str;
 
 class OrderController extends Controller
 {
     // URL microservice lain
-    private string $userServiceUrl = 'http://127.0.0.1:5000';
-    private string $productServiceUrl = 'http://127.0.0.1:8000';
+    private string $userServiceUrl;
+    private string $productServiceUrl;
+
+    // Cache local untuk efisiensi saat index (memoization)
+    private array $userCache = [];
+    private array $productCache = [];
+
+    public function __construct()
+    {
+        $this->userServiceUrl = config('services.user_service.url');
+        $this->productServiceUrl = config('services.product_service.url');
+    }
 
     /**
      * Ambil data user dari User Service (Flask).
      */
     private function getUserData($userId)
     {
+        if (isset($this->userCache[$userId])) {
+            return $this->userCache[$userId];
+        }
+
         try {
             $response = Http::timeout(5)->get("{$this->userServiceUrl}/users/{$userId}");
 
             if ($response->successful()) {
-                return $response->json()['data'] ?? $response->json();
+                $data = $response->json()['data'] ?? $response->json();
+                $this->userCache[$userId] = $data;
+                return $data;
             }
 
             return null;
@@ -36,11 +53,17 @@ class OrderController extends Controller
      */
     private function getProductData($productId)
     {
+        if (isset($this->productCache[$productId])) {
+            return $this->productCache[$productId];
+        }
+
         try {
             $response = Http::timeout(5)->get("{$this->productServiceUrl}/api/obat/{$productId}");
 
             if ($response->successful()) {
-                return $response->json()['data'] ?? $response->json();
+                $data = $response->json()['data'] ?? $response->json();
+                $this->productCache[$productId] = $data;
+                return $data;
             }
 
             return null;
@@ -50,15 +73,24 @@ class OrderController extends Controller
     }
 
     /**
-     * Gabungkan data order dengan data user & product dari service lain.
+     * Gabungkan data order dengan data user & product dari service lain (Field terbatas).
      */
     private function enrichOrder($order)
     {
-        $orderData = $order->toArray();
-        $orderData['user'] = $this->getUserData($order->user_id);
-        $orderData['product'] = $this->getProductData($order->product_id);
+        $userData = $this->getUserData($order->user_id);
+        $productData = $this->getProductData($order->product_id);
 
-        return $orderData;
+        return [
+            'id'             => $order->id,
+            'order_code'     => $order->order_code,
+            'nama_produk'    => $productData['name'] ?? ($productData['nama_obat'] ?? 'Produk tidak ditemukan'),
+            'quantity'       => $order->quantity,
+            'total_price'    => $order->total_price,
+            'nama_pemesan'   => $userData['name'] ?? ($userData['username'] ?? 'User tidak ditemukan'),
+            'email_pemesan'  => $userData['email'] ?? '-',
+            'status'         => $order->status,
+            'tanggal_order'  => $order->created_at->format('Y-m-d H:i:s'),
+        ];
     }
 
     /**
@@ -66,9 +98,9 @@ class OrderController extends Controller
      */
     public function index()
     {
-        $orders = Order::all();
+        $orders = Order::latest()->get();
 
-        // Enrich setiap order dengan data dari service lain
+        // Enrich setiap order dengan data dari service lain (menggunakan cache)
         $enrichedOrders = $orders->map(function ($order) {
             return $this->enrichOrder($order);
         });
@@ -94,26 +126,73 @@ class OrderController extends Controller
 
     /**
      * Membuat order baru.
-     * user_id otomatis dari data login (middleware verify.login).
-     * Cukup kirim product_id dan quantity saja.
      */
     public function store(Request $request)
     {
-        // user_id otomatis dari data login (sudah diverifikasi middleware)
-        $authUser = $request->auth_user;
-        $userId = $authUser['id'];
+        // Pastikan validasi mengembalikan JSON jika gagal
+        $validator = \Illuminate\Support\Facades\Validator::make($request->all(), [
+            'product_id' => 'required',
+            'quantity'   => 'required|integer|min:1',
+            'user_id'    => 'nullable|integer',
+        ]);
 
-        // Validasi: cek apakah product ada di Product Service
+        if ($validator->fails()) {
+            return new OrderResource(null, 'gagal', $validator->errors()->first());
+        }
+
+        // Prioritas user_id: dari request, jika tidak ada baru dari data login
+        $authUser = $request->auth_user;
+        $userId = $request->user_id ?? ($authUser['id'] ?? null);
+
+        if (!$userId) {
+            return new OrderResource(null, 'gagal', 'User ID tidak ditemukan. Silahkan login atau lampirkan user_id');
+        }
+
+        // --- VALIDASI USER EXISTENCE ---
+        $userData = $this->getUserData($userId);
+        if (!$userData || (is_array($userData) && empty($userData))) {
+            return new OrderResource(null, 'gagal', "User dengan ID {$userId} tidak ditemukan di User Service");
+        }
+
+        // --- VALIDASI PRODUCT EXISTENCE ---
         $productData = $this->getProductData($request->product_id);
-        if (!$productData) {
+        if (!$productData || (is_array($productData) && empty($productData))) {
             return new OrderResource(null, 'gagal', 'Produk tidak ditemukan di Product Service');
         }
 
+        // --- VALIDASI STOK ---
+        $stokTersedia = $productData['stock'] ?? ($productData['stok'] ?? 0);
+        if ($stokTersedia < $request->quantity) {
+            return new OrderResource(null, 'gagal', "Stok tidak mencukupi. Stok tersedia: {$stokTersedia}");
+        }
+
         // Hitung total_price otomatis dari harga produk x quantity
-        $harga = $productData['harga'] ?? 0;
+        $harga = $productData['price'] ?? ($productData['harga'] ?? 0);
         $totalPrice = $harga * $request->quantity;
 
+        // --- GENERATE CREATIVE ORDER CODE ---
+        // Format: ORD-namapemesan-namaobat-randomint
+        $namaPemesan = Str::slug($userData['name'] ?? ($userData['username'] ?? 'user'));
+        $namaProduk = Str::slug($productData['name'] ?? ($productData['nama_obat'] ?? 'produk'));
+        $randomInt = rand(1000, 9999);
+        $orderCode = "ORD-{$namaPemesan}-{$namaProduk}-{$randomInt}";
+
+        // --- PENGURANGAN STOK DI PRODUCT SERVICE ---
+        try {
+            $newStok = $stokTersedia - $request->quantity;
+            $updateStockResponse = Http::timeout(5)->put("{$this->productServiceUrl}/api/obat/{$request->product_id}", [
+                'stock' => $newStok
+            ]);
+
+            if (!$updateStockResponse->successful()) {
+                return new OrderResource(null, 'gagal', 'Gagal memperbarui stok di Product Service');
+            }
+        } catch (\Exception $e) {
+            return new OrderResource(null, 'gagal', 'Terjadi kesalahan saat menghubungi Product Service untuk update stok');
+        }
+
         $order = Order::create([
+            'order_code'  => $orderCode,
             'user_id'     => $userId,
             'product_id'  => $request->product_id,
             'quantity'    => $request->quantity,
@@ -121,10 +200,8 @@ class OrderController extends Controller
             'status'      => $request->status ?? 'pending',
         ]);
 
-        // Response dengan data lengkap dari semua service
-        $orderData = $order->toArray();
-        $orderData['user'] = $authUser;
-        $orderData['product'] = $productData;
+        // Response dengan data terpilih (menggunakan enrichOrder)
+        $orderData = $this->enrichOrder($order);
 
         return new OrderResource($orderData, 'berhasil', 'Data order berhasil ditambahkan');
     }
@@ -140,7 +217,26 @@ class OrderController extends Controller
             return new OrderResource(null, 'gagal', 'Data order tidak ditemukan');
         }
 
-        $order->update($request->all());
+        $data = $request->all();
+
+        // Jika ada perubahan product_id atau quantity, hitung ulang total_price
+        if ($request->has('product_id') || $request->has('quantity')) {
+            $productId = $request->product_id ?? $order->product_id;
+            $quantity = $request->quantity ?? $order->quantity;
+
+            $productData = $this->getProductData($productId);
+            if (!$productData) {
+                return new OrderResource(null, 'gagal', 'Produk tidak ditemukan di Product Service');
+            }
+
+            $harga = $productData['harga'] ?? 0;
+            $data['total_price'] = $harga * $quantity;
+        }
+
+        $order->update($data);
+
+        // Reset cache agar data terbaru diambil jika ada perubahan
+        $this->productCache = [];
 
         $enrichedOrder = $this->enrichOrder($order);
 

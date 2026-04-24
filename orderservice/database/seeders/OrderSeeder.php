@@ -14,6 +14,7 @@ class OrderSeeder extends Seeder
     {
         $orders = [
             [
+                'order_code'  => 'ORD-Budi-Paracetamol-1234',
                 'user_id'     => 1,
                 'product_id'  => 1,
                 'quantity'    => 2,
@@ -21,25 +22,12 @@ class OrderSeeder extends Seeder
                 'status'      => 'pending',
             ],
             [
+                'order_code'  => 'ORD-Ani-Amoxicillin-5678',
                 'user_id'     => 2,
                 'product_id'  => 3,
                 'quantity'    => 1,
                 'total_price' => 25000,
                 'status'      => 'processing',
-            ],
-            [
-                'user_id'     => 1,
-                'product_id'  => 2,
-                'quantity'    => 3,
-                'total_price' => 75000,
-                'status'      => 'completed',
-            ],
-            [
-                'user_id'     => 3,
-                'product_id'  => 1,
-                'quantity'    => 1,
-                'total_price' => 25000,
-                'status'      => 'cancelled',
             ],
         ];
 

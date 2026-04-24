@@ -27,12 +27,13 @@ class VerifyUserLogin
         }
 
         try {
+            $userServiceUrl = config('services.user_service.url');
             // Forward token ke User Service endpoint /is_login
             $response = Http::timeout(5)
                 ->withHeaders([
                     'Authorization' => 'Bearer ' . $token,
                 ])
-                ->get('http://127.0.0.1:5000/is_login');
+                ->get("{$userServiceUrl}/is_login");
 
             if ($response->successful() && $response->json()['status'] === 'berhasil') {
                 // Simpan data user ke request agar bisa dipakai di controller

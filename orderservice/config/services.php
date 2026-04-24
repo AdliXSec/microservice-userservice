@@ -35,4 +35,12 @@ return [
         ],
     ],
 
+    'user_service' => [
+        'url' => env('USER_SERVICE_URL', 'http://127.0.0.1:5000'),
+    ],
+
+    'product_service' => [
+        'url' => env('PRODUCT_SERVICE_URL', 'http://127.0.0.1:8000'),
+    ],
+
 ];

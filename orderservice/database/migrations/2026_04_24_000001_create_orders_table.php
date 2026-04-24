@@ -13,6 +13,7 @@ return new class extends Migration
     {
         Schema::create('orders', function (Blueprint $table) {
             $table->id();
+            $table->string('order_code')->unique();      // Kode unik pesanan
             $table->unsignedBigInteger('user_id');       // ID dari User Service
             $table->unsignedBigInteger('product_id');     // ID dari Product Service (obat)
             $table->integer('quantity')->default(1);
