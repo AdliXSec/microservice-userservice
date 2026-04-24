@@ -13,9 +13,11 @@ return new class extends Migration
     {
         Schema::create('orders', function (Blueprint $table) {
             $table->id();
-            $table->string('order_code')->unique();      // Kode unik pesanan
-            $table->unsignedBigInteger('user_id');       // ID dari User Service
-            $table->unsignedBigInteger('product_id');     // ID dari Product Service (obat)
+            $table->string('order_code')->unique();
+            $table->unsignedBigInteger('user_id');
+            $table->string('customer_name');             // Nama pemesan saat order dibuat
+            $table->string('customer_email');            // Email pemesan saat order dibuat
+            $table->unsignedBigInteger('product_id');
             $table->integer('quantity')->default(1);
             $table->decimal('total_price', 12, 2)->default(0);
             $table->enum('status', ['pending', 'processing', 'completed', 'cancelled'])->default('pending');

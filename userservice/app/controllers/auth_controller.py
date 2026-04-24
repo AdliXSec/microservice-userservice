@@ -43,4 +43,5 @@ class AuthController:
         
     # @staticmethod
     # def logout(id):
+    #     return {"message": "User logged out successfully"}, 200
         
