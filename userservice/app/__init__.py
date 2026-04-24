@@ -22,8 +22,8 @@ def create_app():
     jwt.init_app(app)
 
     # Daftarkan Blueprint
-    from app.views.user_view import user_bp
-    from app.views.auth_view import auth_bp
+    from app.routes.user_view import user_bp
+    from app.routes.auth_view import auth_bp
     app.register_blueprint(user_bp)
     app.register_blueprint(auth_bp)
 
