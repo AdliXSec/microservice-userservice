@@ -52,13 +52,11 @@ class OrderController extends Controller
      */
     public function store(Request $request)
     {
-        // 1. Validasi Input
         $validator = $this->validateOrderRequest($request);
         if ($validator->fails()) {
             return new OrderResource(null, 'gagal', $validator->errors()->first());
         }
 
-        // 2. Identifikasi User
         $userId = $request->user_id ?? ($request->auth_user['id'] ?? null);
         $userData = $this->fetchUserData($userId);
 
@@ -66,7 +64,6 @@ class OrderController extends Controller
             return new OrderResource(null, 'gagal', "User tidak ditemukan");
         }
 
-        // 3. Validasi Produk & Stok
         $productData = $this->fetchProductData($request->product_id);
         if (!$productData) {
             return new OrderResource(null, 'gagal', 'Produk tidak ditemukan');
@@ -76,21 +73,19 @@ class OrderController extends Controller
             return new OrderResource(null, 'gagal', "Stok tidak cukup. Tersedia: " . ($productData['stock'] ?? 0));
         }
 
-        // 4. Proses Eksternal (Update Stok di Product Service)
         if (!$this->deductProductStock($request->product_id, $productData, $request->quantity)) {
             return new OrderResource(null, 'gagal', 'Gagal sinkronisasi stok ke Product Service');
         }
 
-        // 5. Simpan ke Database
         $order = Order::create([
-            'order_code'     => $this->generateOrderCode($userData, $productData),
-            'user_id'        => $userId,
-            'customer_name'  => $userData['name'] ?? ($userData['username'] ?? 'Unknown'),
+            'order_code' => $this->generateOrderCode($userData, $productData),
+            'user_id' => $userId,
+            'customer_name' => $userData['name'] ?? ($userData['username'] ?? 'Unknown'),
             'customer_email' => $userData['email'] ?? '-',
-            'product_id'     => $request->product_id,
-            'quantity'       => $request->quantity,
-            'total_price'    => ($productData['price'] ?? 0) * $request->quantity,
-            'status'         => self::STATUS_PENDING,
+            'product_id' => $request->product_id,
+            'quantity' => $request->quantity,
+            'total_price' => ($productData['price'] ?? 0) * $request->quantity,
+            'status' => self::STATUS_PENDING,
         ]);
 
         return new OrderResource($this->transformOrder($order), 'berhasil', 'Order berhasil dibuat');
@@ -131,7 +126,6 @@ class OrderController extends Controller
             : new OrderResource(null, 'gagal', 'Order tidak ditemukan');
     }
 
-    // --- HELPER METHODS (Private) ---
 
     private function validateOrderRequest($request)
     {
@@ -186,17 +180,71 @@ class OrderController extends Controller
         $prod = $this->fetchProductData($order->product_id);
 
         return [
-            'id'             => $order->id,
-            'order_code'     => $order->order_code,
-            'product_name'   => $prod['name'] ?? 'Produk dihapus',
-            'category'       => $prod['category'] ?? 'Kategori dihapus',
-            'quantity'       => $order->quantity,
-            'total_price'    => (float) $order->total_price,
-            'customer_name'  => $order->customer_name,
+            'id' => $order->id,
+            'order_code' => $order->order_code,
+            'product_name' => $prod['name'] ?? 'Produk dihapus',
+            'category' => $prod['category'] ?? 'Kategori dihapus',
+            'quantity' => $order->quantity,
+            'total_price' => (float) $order->total_price,
+            'customer_name' => $order->customer_name,
             'customer_email' => $order->customer_email,
-            'status'         => $order->status,
-            'created_at'     => $order->created_at->toDateTimeString(),
+            'status' => $order->status,
+            'created_at' => $order->created_at->toDateTimeString(),
         ];
+    }
+
+    /**
+     * Update data order (Admin Only).
+     */
+    public function update(Request $request, $id)
+    {
+        $order = Order::find($id);
+        if (!$order)
+            return new OrderResource(null, 'gagal', 'Order tidak ditemukan');
+
+        if (in_array($order->status, [self::STATUS_COMPLETED, self::STATUS_CANCELLED])) {
+            return new OrderResource(null, 'gagal', 'Order yang sudah selesai atau dibatalkan tidak dapat diedit');
+        }
+
+        $validator = Validator::make($request->all(), [
+            'product_id' => 'nullable',
+            'quantity' => 'nullable|integer|min:1',
+            'status' => 'nullable|in:pending,processing,completed,cancelled'
+        ]);
+
+        if ($validator->fails()) {
+            return new OrderResource(null, 'gagal', $validator->errors()->first());
+        }
+
+        $productId = $request->product_id ?? $order->product_id;
+        $quantity = $request->quantity ?? $order->quantity;
+
+        $productData = $this->fetchProductData($productId);
+        if (!$productData)
+            return new OrderResource(null, 'gagal', 'Produk tidak ditemukan');
+
+        if ($request->has('quantity') || $request->has('product_id')) {
+            $oldProductData = $this->fetchProductData($order->product_id);
+
+            $this->deductProductStock($order->product_id, $oldProductData, -$order->quantity);
+
+            $currentProductData = $this->fetchProductData($productId);
+            if (!$this->hasEnoughStock($currentProductData, $quantity)) {
+                $this->deductProductStock($order->product_id, $oldProductData, $order->quantity);
+                return new OrderResource(null, 'gagal', 'Stok baru tidak mencukupi');
+            }
+
+            $this->deductProductStock($productId, $currentProductData, $quantity);
+        }
+
+        $order->update([
+            'product_id' => $productId,
+            'quantity' => $quantity,
+            'total_price' => ($productData['price'] ?? 0) * $quantity,
+            'status' => $request->status ?? $order->status,
+        ]);
+
+        return new OrderResource($this->transformOrder($order), 'berhasil', 'Order berhasil diperbarui');
     }
 
     public function destroy($id)
