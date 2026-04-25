@@ -36,9 +36,11 @@ class VerifyUserLogin
                 ->get("{$userServiceUrl}/is_login");
 
             if ($response->successful() && $response->json()['status'] === 'berhasil') {
-                // Simpan data user ke request agar bisa dipakai di controller
+                $userData = $response->json()['data'];
+                // Simpan data user ke request agar bisa dipakai di middleware lain & controller
                 $request->merge([
-                    'auth_user' => $response->json()['data'],
+                    'auth_user' => $userData,
+                    'user_role' => $userData['role'] ?? 'user'
                 ]);
 
                 return $next($request);

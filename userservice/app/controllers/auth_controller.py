@@ -28,7 +28,6 @@ class AuthController:
     def login(email, password):
         user = User.query.filter_by(email=email).first()
         
-        # Verifikasi password yang di-hash
         if user and bcrypt.check_password_hash(user.password, password):
             access_token = create_access_token(
                 identity=str(user.id), 
@@ -51,11 +50,9 @@ class AuthController:
     
     @staticmethod
     def refresh_token(id, jti):
-        # 1. Masukkan token lama (JTI) ke blacklist
         blocked_token = TokenBlocklist(jti=jti)
         db.session.add(blocked_token)
         
-        # 2. Cari user
         user = User.query.filter_by(id=id).first()
         if not user:
             db.session.commit() 
@@ -65,7 +62,6 @@ class AuthController:
                 "data": None
             }, 404
             
-        # 3. Buat token baru
         access_token = create_access_token(
             identity=str(user.id), 
             additional_claims={"role": user.role}
@@ -84,7 +80,6 @@ class AuthController:
 
     @staticmethod
     def logout(jti):
-        # Masukkan token saat ini ke blacklist agar tidak bisa dipakai lagi
         blocked_token = TokenBlocklist(jti=jti)
         db.session.add(blocked_token)
         db.session.commit()
