@@ -31,9 +31,17 @@ def create_app():
     bcrypt.init_app(app)
     jwt.init_app(app)
 
+    # Callback untuk mengecek apakah token ada di blocklist
+    from app.models.user_model import TokenBlocklist
+    @jwt.token_in_blocklist_loader
+    def check_if_token_revoked(jwt_header, jwt_payload):
+        jti = jwt_payload["jti"]
+        token = TokenBlocklist.query.filter_by(jti=jti).first()
+        return token is not None
+
     # Daftarkan Blueprint
-    from app.routes.user_view import user_bp
-    from app.routes.auth_view import auth_bp
+    from app.routes.user import user_bp
+    from app.routes.auth import auth_bp
     app.register_blueprint(user_bp)
     app.register_blueprint(auth_bp)
 

@@ -1,6 +1,7 @@
 from app import db
 
 class User(db.Model):
+    # ... (existing User model code)
     __tablename__ = 'users'
     
     id = db.Column(db.Integer, primary_key=True)
@@ -14,6 +15,11 @@ class User(db.Model):
             "id": self.id,
             "name": self.name,
             "email": self.email,
-            "role": self.role,
-            "password": self.password
+            "role": self.role
         }
+
+class TokenBlocklist(db.Model):
+    __tablename__ = 'token_blocklist'
+    id = db.Column(db.Integer, primary_key=True)
+    jti = db.Column(db.String(36), nullable=False, index=True)
+    created_at = db.Column(db.DateTime, nullable=False, server_default=db.func.now())

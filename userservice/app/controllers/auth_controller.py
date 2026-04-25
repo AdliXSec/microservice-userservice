@@ -1,20 +1,28 @@
-from app.models.user_model import User
+from app.models.user_model import User, TokenBlocklist
 from app import db, bcrypt
-from flask_jwt_extended import create_access_token
+from flask_jwt_extended import create_access_token, get_jwt
 
 class AuthController:
     @staticmethod
     def register(name, email, password, role='user'):
         # Cek apakah email sudah ada
         if User.query.filter_by(email=email).first():
-            return {"error": "Email already exists"}, 400
+            return {
+                "status": "gagal",
+                "message": "Email sudah terdaftar",
+                "data": None
+            }, 400
         
         hashed_password = bcrypt.generate_password_hash(password).decode('utf-8')
         new_user = User(name=name, email=email, password=hashed_password, role=role)
         
         db.session.add(new_user)
         db.session.commit()
-        return {"message": "User registered successfully", "user": new_user.to_dict()}, 201
+        return {
+            "status": "berhasil",
+            "message": "User berhasil didaftarkan",
+            "data": new_user.to_dict()
+        }, 201
 
     @staticmethod
     def login(email, password):
@@ -22,26 +30,67 @@ class AuthController:
         
         # Verifikasi password yang di-hash
         if user and bcrypt.check_password_hash(user.password, password):
-            # Membuat token JWT (berlaku standar 1 jam)
-            # Kita bisa menyimpan informasi user (seperti ID atau role) di dalam token
-            access_token = create_access_token(identity=str(user.id), additional_claims={"role": user.role})
+            access_token = create_access_token(
+                identity=str(user.id), 
+                additional_claims={"role": user.role}
+            )
             return {
-                "access_token": access_token,
-                "user": user.to_dict()
+                "status": "berhasil",
+                "message": "Login berhasil",
+                "data": {
+                    "access_token": access_token,
+                    "user": user.to_dict()
+                }
             }, 200
         
-        return {"error": "Invalid email or password"}, 401
+        return {
+            "status": "gagal",
+            "message": "Email atau password salah",
+            "data": None
+        }, 401
     
     @staticmethod
-    def refresh_token(id):
-        user = User.query.get(id)
-        access_token = create_access_token(identity=str(user.id), additional_claims={"role": user.role})
+    def refresh_token(id, jti):
+        # 1. Masukkan token lama (JTI) ke blacklist
+        blocked_token = TokenBlocklist(jti=jti)
+        db.session.add(blocked_token)
+        
+        # 2. Cari user
+        user = User.query.filter_by(id=id).first()
+        if not user:
+            db.session.commit() 
+            return {
+                "status": "gagal",
+                "message": "User tidak ditemukan",
+                "data": None
+            }, 404
+            
+        # 3. Buat token baru
+        access_token = create_access_token(
+            identity=str(user.id), 
+            additional_claims={"role": user.role}
+        )
+        
+        db.session.commit()
+        
         return {
-            "access_token": access_token,
-            "user": user.to_dict()
+            "status": "berhasil",
+            "message": "Token berhasil diperbarui, token lama telah dicabut",
+            "data": {
+                "access_token": access_token,
+                "user": user.to_dict()
+            }
         }, 200
+
+    @staticmethod
+    def logout(jti):
+        # Masukkan token saat ini ke blacklist agar tidak bisa dipakai lagi
+        blocked_token = TokenBlocklist(jti=jti)
+        db.session.add(blocked_token)
+        db.session.commit()
         
-    # @staticmethod
-    # def logout(id):
-    #     return {"message": "User logged out successfully"}, 200
-        
+        return {
+            "status": "berhasil",
+            "message": "Logout berhasil, token telah dicabut",
+            "data": None
+        }, 200

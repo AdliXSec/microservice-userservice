@@ -23,20 +23,20 @@ def get_user(user_id):
     user = UserController.get_user_by_id(user_id)
     if user:
         return jsonify(response("berhasil", "Data berhasil diambil", user)), 200
-    return jsonify(response("error", "Data tidak ditemukan", None)), 404
+    return jsonify(response("gagal", "Data tidak ditemukan", None)), 404
 
 @user_bp.route('/users/<int:user_id>', methods=['PUT'])
 @jwt_required()
 def update_user(user_id):
     data = request.get_json()
     if not data or 'name' not in data or 'email' not in data or 'password' not in data:
-        return jsonify({"error": "Missing name, email, or password"}), 400
+        return jsonify(response("gagal", "Missing name, email, or password", None)), 400
     
     role = data.get('role', 'user')
     user = UserController.update_user(user_id, data['name'], data['email'], data['password'], role)
     if user:
         return jsonify(response("berhasil", "Data berhasil diupdate", user)), 200
-    return jsonify(response("error", "Data tidak ditemukan", None)), 404
+    return jsonify(response("gagal", "Data tidak ditemukan", None)), 404
 
 @user_bp.route('/users/<int:user_id>', methods=['DELETE'])
 @jwt_required()
@@ -44,7 +44,7 @@ def delete_user(user_id):
     user = UserController.delete_user(user_id)
     if user:
         return jsonify(response("berhasil", "Data berhasil dihapus", None)), 200 
-    return jsonify(response("error", "Data tidak ditemukan", None)), 404
+    return jsonify(response("gagal", "Data tidak ditemukan", None)), 404
 
 @user_bp.route('/is_login', methods=['GET'])
 @jwt_required()
@@ -53,7 +53,7 @@ def is_login():
     user = UserController.get_user_by_id(user_id)
     if user:
         return jsonify(response("berhasil", "Data berhasil diambil", user)), 200
-    return jsonify(response("error", "Data tidak ditemukan", None)), 404
+    return jsonify(response("gagal", "Data tidak ditemukan", None)), 404
     
 # @user_bp.route('/users', methods=['POST'])
 # def create_user():

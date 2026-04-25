@@ -26,6 +26,16 @@ def login_user():
 @auth_bp.route('/refresh', methods=['GET'])
 @jwt_required()
 def refresh_token():
-    user_id = get_jwt().get("sub")
-    response, status_code = AuthController.refresh_token(user_id)
+    jwt_data = get_jwt()
+    user_id = jwt_data.get("sub")
+    jti = jwt_data.get("jti") # ID unik token saat ini
+    
+    response, status_code = AuthController.refresh_token(user_id, jti)
+    return jsonify(response), status_code
+
+@auth_bp.route('/logout', methods=['POST'])
+@jwt_required()
+def logout():
+    jti = get_jwt().get("jti") # Ambil ID token yang sedang digunakan
+    response, status_code = AuthController.logout(jti)
     return jsonify(response), status_code
