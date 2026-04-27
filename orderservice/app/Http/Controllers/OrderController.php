@@ -14,10 +14,23 @@ class OrderController extends Controller
     private string $userServiceUrl;
     private string $productServiceUrl;
 
+    private array $usersCache = [];
+
     public function __construct()
     {
         $this->userServiceUrl = config('services.user_service.url');
         $this->productServiceUrl = config('services.product_service.url');
+    }
+
+    protected function fetchUserData($id)
+    {
+        if (!$id)
+            return null;
+        if (isset($this->usersCache[$id]))
+            return $this->usersCache[$id];
+
+        $response = Http::timeout(5)->get("http://127.0.0.1:5000/users/{$id}");
+        return $this->usersCache[$id] = $response->successful() ? ($response->json()['data'] ?? $response->json()) : null;
     }
 
     public function index()
@@ -28,9 +41,13 @@ class OrderController extends Controller
 
     public function store(Request $request)
     {
+
+        $userId = $request->user_id ?? ($request->auth_user['id'] ?? null);
+        $userData = $this->fetchUserData($userId);
+
         $validator = Validator::make($request->all(), [
             'product_id' => 'required',
-            'user_id' => 'required',
+            // 'user_id' => '',
             'quantity' => 'required',
         ]);
 
@@ -39,13 +56,13 @@ class OrderController extends Controller
         }
 
         $userResponse = Http::get("http://127.0.0.1:5000/users/{$request->user_id}");
-        $user = $userResponse->json()['data'] ?? null;
+        // $user = $userResponse->json()['data'] ?? null;
 
-        if (!$user) {
+        if (!$userData) {
             return new OrderResource(null, 'Failed', 'User not found');
         }
 
-        $productResponse = Http::get("http://127.0.0.1:8001/api/products/{$request->product_id}");
+        $productResponse = Http::get("http://127.0.0.1:8000/api/obat/{$request->product_id}");
         $productData = $productResponse->json()['data'] ?? null;
 
         if (!$productData) {
@@ -53,18 +70,18 @@ class OrderController extends Controller
         }
 
         $order = Order::create([
-            'order_code' => $this->generateOrderCode($user, $productData),
-            'user_id' => $request->user_id,
-            'customer_name' => $user['name'] ?? ($user['username'] ?? 'Unknown'),
-            'customer_email' => $user['email'] ?? '-',
+            'order_code' => $this->generateOrderCode($userData, $productData),
+            'user_id' => $userId,
+            'customer_name' => $userData['name'] ?? ($userData['username'] ?? 'Unknown'),
+            'customer_email' => $userData['email'] ?? '-',
             'product_id' => $request->product_id,
             'quantity' => $request->quantity,
             'total_price' => ($productData['price'] ?? 0) * $request->quantity,
             'status' => 'pending',
         ]);
 
-        Http::post("http://127.0.0.1:8001/api/products/{$request->product_id}", [
-            'stock' => $request->quantity,
+        Http::put("http://127.0.0.1:8000/api/obat/{$request->product_id}", [
+            'stock' => $productData['stock'] - $request->quantity,
         ]);
 
         return new OrderResource($order, 'Success', 'Order created successfully');
@@ -77,7 +94,7 @@ class OrderController extends Controller
             $data = $order->toArray();
 
             // Get the product details (consume)
-            $productResponse = Http::get("{$this->productServiceUrl}/api/products/{$order->product_id}");
+            $productResponse = Http::get("{$this->productServiceUrl}/api/obat/{$order->product_id}");
             $data['product'] = $productResponse->json()['data'] ?? null;
 
             // Get the user details (consume)
@@ -108,11 +125,23 @@ class OrderController extends Controller
         }
 
         // Get Product Info for price
-        $productResponse = Http::get("{$this->productServiceUrl}/api/products/{$request->product_id}");
+        $productResponse = Http::get("{$this->productServiceUrl}/api/obat/{$request->product_id}");
         $productData = $productResponse->json()['data'] ?? null;
 
         if (!$productData) {
             return new OrderResource(null, 'Failed', 'Product not found');
+        }
+
+        if ($order->quantity > $request->quantity) {
+            $qtt = $order->quantity - $request->quantity;
+            Http::put("http://127.0.0.1:8000/api/obat/{$request->product_id}", [
+                'stock' => $productData['stock'] + $qtt,
+            ]);
+        } else {
+            $qtt = $request->quantity - $order->quantity;
+            Http::put("http://127.0.0.1:8000/api/obat/{$request->product_id}", [
+                'stock' => $productData['stock'] - $qtt,
+            ]);
         }
 
         $order->update([
@@ -121,6 +150,7 @@ class OrderController extends Controller
             'total_price' => ($productData['price'] ?? 0) * $request->quantity,
             'status' => $request->status,
         ]);
+
 
         return new OrderResource($order, 'Success', 'Order updated successfully');
     }

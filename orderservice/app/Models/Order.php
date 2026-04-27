@@ -19,4 +19,14 @@ class Order extends Model
         'total_price',
         'status',
     ];
+
+    /**
+     * Cast attributes to native types.
+     */
+    protected $casts = [
+        'total_price' => 'double',
+        'quantity' => 'integer',
+        'user_id' => 'integer',
+        'product_id' => 'integer',
+    ];
 }
