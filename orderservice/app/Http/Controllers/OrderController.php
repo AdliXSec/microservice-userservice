@@ -2,8 +2,8 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\Order;
 use App\Http\Resources\OrderResource;
+use App\Models\Order;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Validator;
@@ -11,18 +11,8 @@ use Illuminate\Support\Str;
 
 class OrderController extends Controller
 {
-    // Konstanta Status untuk menghindari error penulisan
-    const STATUS_PENDING = 'pending';
-    const STATUS_PROCESSING = 'processing';
-    const STATUS_COMPLETED = 'completed';
-    const STATUS_CANCELLED = 'cancelled';
-
     private string $userServiceUrl;
     private string $productServiceUrl;
-
-    // Cache local untuk performa
-    private array $userCache = [];
-    private array $productCache = [];
 
     public function __construct()
     {
@@ -30,142 +20,131 @@ class OrderController extends Controller
         $this->productServiceUrl = config('services.product_service.url');
     }
 
-    /**
-     * Tampilkan daftar order dengan filter.
-     */
-    public function index(Request $request)
+    public function index()
     {
-        $orders = Order::query()
-            ->when($request->order_code, fn($q) => $q->where('order_code', 'like', "%{$request->order_code}%"))
-            ->when($request->user_id, fn($q) => $q->where('user_id', $request->user_id))
-            ->when($request->status, fn($q) => $q->where('status', $request->status))
-            ->latest()
-            ->get();
-
-        $enrichedOrders = $orders->map(fn($order) => $this->transformOrder($order));
-
-        return new OrderResource($enrichedOrders, 'berhasil', 'List data order');
+        $orders = Order::all();
+        return new OrderResource($orders, 'Success', 'List of orders');
     }
 
-    /**
-     * Simpan order baru.
-     */
     public function store(Request $request)
     {
-        $validator = $this->validateOrderRequest($request);
+        $validator = Validator::make($request->all(), [
+            'product_id' => 'required',
+            'user_id' => 'required',
+            'quantity' => 'required',
+        ]);
+
         if ($validator->fails()) {
-            return new OrderResource(null, 'gagal', $validator->errors()->first());
+            return new OrderResource(null, 'Failed', $validator->errors());
         }
 
-        $userId = $request->user_id ?? ($request->auth_user['id'] ?? null);
-        $userData = $this->fetchUserData($userId);
+        $userResponse = Http::get("http://127.0.0.1:5000/users/{$request->user_id}");
+        $user = $userResponse->json()['data'] ?? null;
 
-        if (!$userData) {
-            return new OrderResource(null, 'gagal', "User tidak ditemukan");
+        if (!$user) {
+            return new OrderResource(null, 'Failed', 'User not found');
         }
 
-        $productData = $this->fetchProductData($request->product_id);
+        $productResponse = Http::get("http://127.0.0.1:8001/api/products/{$request->product_id}");
+        $productData = $productResponse->json()['data'] ?? null;
+
         if (!$productData) {
-            return new OrderResource(null, 'gagal', 'Produk tidak ditemukan');
-        }
-
-        if (!$this->hasEnoughStock($productData, $request->quantity)) {
-            return new OrderResource(null, 'gagal', "Stok tidak cukup. Tersedia: " . ($productData['stock'] ?? 0));
-        }
-
-        if (!$this->deductProductStock($request->product_id, $productData, $request->quantity)) {
-            return new OrderResource(null, 'gagal', 'Gagal sinkronisasi stok ke Product Service');
+            return new OrderResource(null, 'Failed', 'Product not found');
         }
 
         $order = Order::create([
-            'order_code' => $this->generateOrderCode($userData, $productData),
-            'user_id' => $userId,
-            'customer_name' => $userData['name'] ?? ($userData['username'] ?? 'Unknown'),
-            'customer_email' => $userData['email'] ?? '-',
+            'order_code' => $this->generateOrderCode($user, $productData),
+            'user_id' => $request->user_id,
+            'customer_name' => $user['name'] ?? ($user['username'] ?? 'Unknown'),
+            'customer_email' => $user['email'] ?? '-',
             'product_id' => $request->product_id,
             'quantity' => $request->quantity,
             'total_price' => ($productData['price'] ?? 0) * $request->quantity,
-            'status' => self::STATUS_PENDING,
+            'status' => 'pending',
         ]);
 
-        return new OrderResource($this->transformOrder($order), 'berhasil', 'Order berhasil dibuat');
+        Http::post("http://127.0.0.1:8001/api/products/{$request->product_id}", [
+            'stock' => $request->quantity,
+        ]);
+
+        return new OrderResource($order, 'Success', 'Order created successfully');
     }
 
-    /**
-     * Update status dengan pengamanan workflow.
-     */
-    public function updateStatus(Request $request, $id)
-    {
-        $order = Order::find($id);
-        if (!$order)
-            return new OrderResource(null, 'gagal', 'Order tidak ditemukan');
-
-        // Proteksi status akhir
-        if (in_array($order->status, [self::STATUS_COMPLETED, self::STATUS_CANCELLED])) {
-            return new OrderResource(null, 'gagal', "Pesanan sudah dalam status permanen ({$order->status})");
-        }
-
-        // Validasi transisi (Pending tidak bisa langsung Completed)
-        if ($request->status === self::STATUS_COMPLETED && $order->status === self::STATUS_PENDING) {
-            return new OrderResource(null, 'gagal', 'Harus melalui tahap processing dulu');
-        }
-
-        $order->update(['status' => $request->status]);
-
-        return new OrderResource($this->transformOrder($order), 'berhasil', 'Status diperbarui');
-    }
-
-    /**
-     * Detail Order.
-     */
     public function show($id)
     {
         $order = Order::find($id);
-        return $order
-            ? new OrderResource($this->transformOrder($order), 'berhasil', 'Detail order')
-            : new OrderResource(null, 'gagal', 'Order tidak ditemukan');
+        if ($order) {
+            $data = $order->toArray();
+
+            // Get the product details (consume)
+            $productResponse = Http::get("{$this->productServiceUrl}/api/products/{$order->product_id}");
+            $data['product'] = $productResponse->json()['data'] ?? null;
+
+            // Get the user details (consume)
+            $userResponse = Http::get("{$this->userServiceUrl}/users/{$order->user_id}");
+            $data['user'] = $userResponse->json()['data'] ?? null;
+
+            return new OrderResource($data, 'Success', 'Order found');
+        } else {
+            return new OrderResource(null, 'Failed', 'Order not found');
+        }
     }
 
-
-    private function validateOrderRequest($request)
+    public function update(Request $request, $id)
     {
-        return Validator::make($request->all(), [
+        $order = Order::find($id);
+        if (!$order) {
+            return new OrderResource(null, 'Failed', 'Order not found');
+        }
+
+        $validator = Validator::make($request->all(), [
             'product_id' => 'required',
-            'quantity' => 'required|integer|min:1',
-            'user_id' => 'nullable|integer',
+            'quantity' => 'required',
+            'status' => 'required',
         ]);
+
+        if ($validator->fails()) {
+            return new OrderResource(null, 'Failed', $validator->errors());
+        }
+
+        // Get Product Info for price
+        $productResponse = Http::get("{$this->productServiceUrl}/api/products/{$request->product_id}");
+        $productData = $productResponse->json()['data'] ?? null;
+
+        if (!$productData) {
+            return new OrderResource(null, 'Failed', 'Product not found');
+        }
+
+        $order->update([
+            'product_id' => $request->product_id,
+            'quantity' => $request->quantity,
+            'total_price' => ($productData['price'] ?? 0) * $request->quantity,
+            'status' => $request->status,
+        ]);
+
+        return new OrderResource($order, 'Success', 'Order updated successfully');
     }
 
-    private function fetchUserData($userId)
+    public function updateStatus(Request $request, $id)
     {
-        if (!$userId)
-            return null;
-        if (isset($this->userCache[$userId]))
-            return $this->userCache[$userId];
+        $order = Order::find($id);
+        if (!$order) {
+            return new OrderResource(null, 'Failed', 'Order not found');
+        }
 
-        $response = Http::timeout(5)->get("{$this->userServiceUrl}/users/{$userId}");
-        return $this->userCache[$userId] = $response->successful() ? ($response->json()['data'] ?? $response->json()) : null;
+        $order->update(['status' => $request->status]);
+        return new OrderResource($order, 'Success', 'Status updated successfully');
     }
 
-    private function fetchProductData($productId)
+    public function destroy($id)
     {
-        if (isset($this->productCache[$productId]))
-            return $this->productCache[$productId];
+        $order = Order::find($id);
+        if (!$order) {
+            return new OrderResource(null, 'Failed', 'Order not found');
+        }
 
-        $response = Http::timeout(5)->get("{$this->productServiceUrl}/api/obat/{$productId}");
-        return $this->productCache[$productId] = $response->successful() ? ($response->json()['data'] ?? $response->json()) : null;
-    }
-
-    private function hasEnoughStock($product, $qty)
-    {
-        $stock = $product['stock'] ?? ($product['stok'] ?? 0);
-        return $stock >= $qty;
-    }
-
-    private function deductProductStock($productId, $product, $qty)
-    {
-        $newStock = ($product['stock'] ?? $product['stok']) - $qty;
-        return Http::timeout(5)->put("{$this->productServiceUrl}/api/obat/{$productId}", ['stock' => $newStock])->successful();
+        $order->delete();
+        return new OrderResource(null, 'Success', 'Order deleted successfully');
     }
 
     private function generateOrderCode($user, $product)
@@ -173,86 +152,5 @@ class OrderController extends Controller
         $name = Str::slug($user['name'] ?? ($user['username'] ?? 'user'));
         $item = Str::slug($product['name'] ?? ($product['nama_obat'] ?? 'item'));
         return strtoupper("ORD-{$name}-{$item}-" . rand(1000, 9999));
-    }
-
-    private function transformOrder($order)
-    {
-        $prod = $this->fetchProductData($order->product_id);
-
-        return [
-            'id' => $order->id,
-            'order_code' => $order->order_code,
-            'product_name' => $prod['name'] ?? 'Produk dihapus',
-            'category' => $prod['category'] ?? 'Kategori dihapus',
-            'quantity' => $order->quantity,
-            'total_price' => (float) $order->total_price,
-            'customer_name' => $order->customer_name,
-            'customer_email' => $order->customer_email,
-            'status' => $order->status,
-            'created_at' => $order->created_at->toDateTimeString(),
-        ];
-    }
-
-    /**
-     * Update data order (Admin Only).
-     */
-    public function update(Request $request, $id)
-    {
-        $order = Order::find($id);
-        if (!$order)
-            return new OrderResource(null, 'gagal', 'Order tidak ditemukan');
-
-        if (in_array($order->status, [self::STATUS_COMPLETED, self::STATUS_CANCELLED])) {
-            return new OrderResource(null, 'gagal', 'Order yang sudah selesai atau dibatalkan tidak dapat diedit');
-        }
-
-        $validator = Validator::make($request->all(), [
-            'product_id' => 'nullable',
-            'quantity' => 'nullable|integer|min:1',
-            'status' => 'nullable|in:pending,processing,completed,cancelled'
-        ]);
-
-        if ($validator->fails()) {
-            return new OrderResource(null, 'gagal', $validator->errors()->first());
-        }
-
-        $productId = $request->product_id ?? $order->product_id;
-        $quantity = $request->quantity ?? $order->quantity;
-
-        $productData = $this->fetchProductData($productId);
-        if (!$productData)
-            return new OrderResource(null, 'gagal', 'Produk tidak ditemukan');
-
-        if ($request->has('quantity') || $request->has('product_id')) {
-            $oldProductData = $this->fetchProductData($order->product_id);
-
-            $this->deductProductStock($order->product_id, $oldProductData, -$order->quantity);
-
-            $currentProductData = $this->fetchProductData($productId);
-            if (!$this->hasEnoughStock($currentProductData, $quantity)) {
-                $this->deductProductStock($order->product_id, $oldProductData, $order->quantity);
-                return new OrderResource(null, 'gagal', 'Stok baru tidak mencukupi');
-            }
-
-            $this->deductProductStock($productId, $currentProductData, $quantity);
-        }
-
-        $order->update([
-            'product_id' => $productId,
-            'quantity' => $quantity,
-            'total_price' => ($productData['price'] ?? 0) * $quantity,
-            'status' => $request->status ?? $order->status,
-        ]);
-
-        return new OrderResource($this->transformOrder($order), 'berhasil', 'Order berhasil diperbarui');
-    }
-
-    public function destroy($id)
-    {
-        $order = Order::find($id);
-        if (!$order)
-            return new OrderResource(null, 'gagal', 'Order tidak ditemukan');
-        $order->delete();
-        return new OrderResource(null, 'berhasil', 'Order dihapus');
     }
 }
