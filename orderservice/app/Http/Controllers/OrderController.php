@@ -71,6 +71,11 @@ class OrderController extends Controller
             return new OrderResource(null, 'gagal', 'Product not found');
         }
 
+        // Check stock
+        if (($productData['stock'] ?? 0) < $request->quantity) {
+            return new OrderResource(null, 'gagal', 'Stok obat tidak mencukupi. Stok saat ini: ' . ($productData['stock'] ?? 0));
+        }
+
         $order = Order::create([
             'order_code' => $this->generateOrderCode($userData, $productData),
             'user_id' => $userId,
@@ -151,6 +156,11 @@ class OrderController extends Controller
                     ]);
         } else {
             $qtt = $request->quantity - $order->quantity;
+
+            if (($productData['stock'] ?? 0) < $qtt) {
+                return new OrderResource(null, 'gagal', 'Stok obat tidak mencukupi untuk penambahan jumlah. Stok saat ini: ' . ($productData['stock'] ?? 0));
+            }
+
             Http::withHeaders([
                 'Authorization' => 'Bearer ' . $token
             ])->put("http://127.0.0.1:8000/api/obat/{$request->product_id}", [
