@@ -89,7 +89,7 @@ class OrderController extends Controller
 
         Http::withHeaders([
             'Authorization' => 'Bearer ' . $token
-        ])->put("http://127.0.0.1:8000/api/obat/{$request->product_id}", [
+        ])->patch("http://127.0.0.1:8000/api/obat/{$request->product_id}/stock", [
                     'stock' => $productData['stock'] - $request->quantity,
                 ]);
 
@@ -151,7 +151,7 @@ class OrderController extends Controller
             $qtt = $order->quantity - $request->quantity;
             Http::withHeaders([
                 'Authorization' => 'Bearer ' . $token
-            ])->put("http://127.0.0.1:8000/api/obat/{$request->product_id}", [
+            ])->patch("http://127.0.0.1:8000/api/obat/{$request->product_id}/stock", [
                         'stock' => $productData['stock'] + $qtt,
                     ]);
         } else {
@@ -163,7 +163,7 @@ class OrderController extends Controller
 
             Http::withHeaders([
                 'Authorization' => 'Bearer ' . $token
-            ])->put("http://127.0.0.1:8000/api/obat/{$request->product_id}", [
+            ])->patch("http://127.0.0.1:8000/api/obat/{$request->product_id}/stock", [
                         'stock' => $productData['stock'] - $qtt,
                     ]);
         }
@@ -208,7 +208,8 @@ class OrderController extends Controller
         return strtoupper("ORD-{$name}-{$item}-" . rand(1000, 9999));
     }
 
-    public function getByUser($id) {
+    public function getByUser($id)
+    {
         $orders = Order::where('user_id', $id)->get();
 
         return new OrderResource($orders, 'berhasil', 'List of user orders');
