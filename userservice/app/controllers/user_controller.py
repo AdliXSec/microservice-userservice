@@ -25,8 +25,8 @@ class UserController:
         if user:
             user.name = name
             user.email = email
-            user.password = bcrypt.generate_password_hash(password).decode('utf-8')
-            user.role = role
+            if password and password.strip() != "":
+                user.password = bcrypt.generate_password_hash(password).decode('utf-8')
             db.session.commit()
             return user.to_dict()
         return None

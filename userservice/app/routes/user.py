@@ -29,11 +29,17 @@ def get_user(user_id):
 @jwt_required()
 def update_user(user_id):
     data = request.get_json()
-    if not data or 'name' not in data or 'email' not in data or 'password' not in data:
+    if not data or 'name' not in data or 'email' not in data:
         return jsonify(response("gagal", "Missing name, email, or password", None)), 400
     
+    password = None
+    if 'password' in data:
+        password = data['password']
+    else:
+        password = None
+        
     role = data.get('role', 'user')
-    user = UserController.update_user(user_id, data['name'], data['email'], data['password'], role)
+    user = UserController.update_user(user_id, data['name'], data['email'], password, role)
     if user:
         return jsonify(response("berhasil", "Data berhasil diupdate", user)), 200
     return jsonify(response("gagal", "Data tidak ditemukan", None)), 404
