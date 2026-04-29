@@ -13,7 +13,7 @@ Route::middleware('verify.login')->group(function () {
 
 
     Route::get('orders/{id}', [OrderController::class, 'show']);
-    // Route::get('orders/user/{id}', [OrderController::class, 'getByUser']);
+    Route::get('orders/user/{id}', [OrderController::class, 'getByUser']);
     Route::post('orders', [OrderController::class, 'store']);
 
     Route::middleware('check.role')->group(function () {

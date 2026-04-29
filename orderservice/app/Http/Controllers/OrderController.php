@@ -207,4 +207,10 @@ class OrderController extends Controller
         $item = Str::slug($product['name'] ?? ($product['nama_obat'] ?? 'item'));
         return strtoupper("ORD-{$name}-{$item}-" . rand(1000, 9999));
     }
+
+    public function getByUser($id) {
+        $orders = Order::where('user_id', $id)->get();
+
+        return new OrderResource($orders, 'berhasil', 'List of user orders');
+    }
 }
