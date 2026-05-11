@@ -64,6 +64,50 @@ return [
             'after_commit' => false,
         ],
 
+        'rabbitmq' => [
+            'driver' => 'rabbitmq',
+            'queue' => env('RABBITMQ_QUEUE', 'default'),
+            'connection' => PhpAmqpLib\Connection\AMQPLazyConnection::class,
+            'worker' => 'default',
+            'hosts' => [
+                [
+                    'host' => env('RABBITMQ_HOST', 'rabbitmq'),
+                    'port' => env('RABBITMQ_PORT', 5672),
+                    'user' => env('RABBITMQ_USER', 'guest'),
+                    'password' => env('RABBITMQ_PASSWORD', 'guest'),
+                    'vhost' => env('RABBITMQ_VHOST', '/'),
+                ],
+            ],
+            'options' => [
+                'queue' => [
+                    'declare' => env('RABBITMQ_QUEUE_DECLARE', true),
+                    'bind' => env('RABBITMQ_QUEUE_BIND', true),
+                    'durable' => env('RABBITMQ_QUEUE_DURABLE', true),
+                ],
+            ],
+        ],
+
+        'rabbitmq_users' => [
+            'driver' => 'rabbitmq',
+            'queue' => 'user_events',
+            'connection' => PhpAmqpLib\Connection\AMQPLazyConnection::class,
+            'worker' => 'default',
+            'hosts' => [
+                [
+                    'host' => env('RABBITMQ_HOST', 'rabbitmq'),
+                    'port' => env('RABBITMQ_PORT', 5672),
+                    'user' => env('RABBITMQ_USER', 'guest'),
+                    'password' => env('RABBITMQ_PASSWORD', 'guest'),
+                    'vhost' => env('RABBITMQ_VHOST', '/'),
+                ],
+            ],
+            'options' => [
+                'queue' => [
+                    'job' => App\Jobs\HandleUserRegistered::class,
+                ],
+            ],
+        ],
+
         'redis' => [
             'driver' => 'redis',
             'connection' => env('REDIS_QUEUE_CONNECTION', 'default'),

@@ -4,3 +4,4 @@ pymysql
 flask-bcrypt
 flask-jwt-extended
 python-dotenv
+pika

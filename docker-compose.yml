@@ -1,0 +1,116 @@
+services:
+  # Python User Service
+  userservice:
+    build:
+      context: ./userservice
+    ports:
+      - "5001:5000"
+    environment:
+      - DATABASE_URL=mysql+pymysql://user:password@db/users_db
+      - JWT_SECRET_KEY=yoursecretkey
+      - RABBITMQ_HOST=rabbitmq
+    volumes:
+      - ./userservice:/app
+    depends_on:
+      - db
+      - rabbitmq
+    networks:
+      - micro-network
+
+  # Laravel Order Service
+  orderservice:
+    build:
+      context: ./orderservice
+    ports:
+      - "8001:80"
+    environment:
+      - APP_ENV=local
+      - DB_CONNECTION=mysql
+      - DB_HOST=db
+      - DB_PORT=3306
+      - DB_DATABASE=orders_db
+      - DB_USERNAME=user
+      - DB_PASSWORD=password
+      - QUEUE_CONNECTION=rabbitmq
+      - RABBITMQ_HOST=rabbitmq
+    volumes:
+      - ./orderservice:/var/www
+    depends_on:
+      - db
+      - rabbitmq
+    networks:
+      - micro-network
+
+  # Laravel Product Service
+  productservice:
+    build:
+      context: ./productservice
+    ports:
+      - "8002:80"
+    environment:
+      - APP_ENV=local
+      - DB_CONNECTION=mysql
+      - DB_HOST=db
+      - DB_PORT=3306
+      - DB_DATABASE=products_db
+      - DB_USERNAME=user
+      - DB_PASSWORD=password
+      - QUEUE_CONNECTION=rabbitmq
+      - RABBITMQ_HOST=rabbitmq
+    volumes:
+      - ./productservice:/var/www
+    depends_on:
+      - db
+      - rabbitmq
+    networks:
+      - micro-network
+
+  # Laravel UI Service
+  uiservice:
+    build:
+      context: ./uiservice
+    ports:
+      - "8000:80"
+    environment:
+      - APP_ENV=local
+      - DB_CONNECTION=mysql
+      - DB_HOST=db
+      - DB_PORT=3306
+      - DB_DATABASE=ui_db
+      - DB_USERNAME=user
+      - DB_PASSWORD=password
+    volumes:
+      - ./uiservice:/var/www
+    depends_on:
+      - db
+    networks:
+      - micro-network
+
+  # Database Service
+  db:
+    image: mysql:8.0
+    environment:
+      - MYSQL_ROOT_PASSWORD=rootpassword
+      - MYSQL_USER=user
+      - MYSQL_PASSWORD=password
+    volumes:
+      - db_data:/var/lib/mysql
+      - ./init-db.sql:/docker-entrypoint-initdb.d/init-db.sql
+    networks:
+      - micro-network
+
+  # RabbitMQ Message Broker
+  rabbitmq:
+    image: rabbitmq:3-management
+    ports:
+      - "5672:5672"   # RabbitMQ port
+      - "15672:15672" # Management UI port
+    networks:
+      - micro-network
+
+networks:
+  micro-network:
+    driver: bridge
+
+volumes:
+  db_data:

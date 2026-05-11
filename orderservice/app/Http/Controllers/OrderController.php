@@ -29,7 +29,7 @@ class OrderController extends Controller
         if (isset($this->usersCache[$id]))
             return $this->usersCache[$id];
 
-        $response = Http::timeout(5)->get("http://127.0.0.1:5000/users/{$id}");
+        $response = Http::timeout(5)->get("{$this->userServiceUrl}/users/{$id}");
         return $this->usersCache[$id] = $response->successful() ? ($response->json()['data'] ?? $response->json()) : null;
     }
 
@@ -55,16 +55,13 @@ class OrderController extends Controller
             return new OrderResource(null, 'gagal', $validator->errors());
         }
 
-        $userResponse = Http::get("http://127.0.0.1:5000/users/{$request->user_id}");
-        // $user = $userResponse->json()['data'] ?? null;
-
         if (!$userData) {
             return new OrderResource(null, 'gagal', 'User not found');
         }
 
         $productResponse = Http::withHeaders([
             'Authorization' => 'Bearer ' . $token
-        ])->get("http://127.0.0.1:8000/api/obat/{$request->product_id}");
+        ])->get("{$this->productServiceUrl}/obat/{$request->product_id}");
         $productData = $productResponse->json()['data'] ?? null;
 
         if (!$productData) {
@@ -87,11 +84,9 @@ class OrderController extends Controller
             'status' => 'pending',
         ]);
 
-        Http::withHeaders([
-            'Authorization' => 'Bearer ' . $token
-        ])->patch("http://127.0.0.1:8000/api/obat/{$request->product_id}/stock", [
-                    'stock' => $productData['stock'] - $request->quantity,
-                ]);
+        // GANTI HTTP PATCH DENGAN RABBITMQ JOB
+        \App\Jobs\UpdateProductStock::dispatch($request->product_id, $request->quantity, 'subtract')
+            ->onQueue('product_stock_queue');
 
         return new OrderResource($order, 'berhasil', 'Order created successfully');
     }
@@ -106,11 +101,11 @@ class OrderController extends Controller
             // Get the product details (consume)
             $productResponse = Http::withHeaders([
                 'Authorization' => 'Bearer ' . $token
-            ])->get("http://127.0.0.1:8000/api/obat/{$order->product_id}");
+            ])->get("{$this->productServiceUrl}/obat/{$order->product_id}");
             $data['product'] = $productResponse->json()['data'] ?? null;
 
             // Get the user details (consume)
-            $userResponse = Http::get("http://127.0.0.1:5000/users/{$order->user_id}");
+            $userResponse = Http::get("{$this->userServiceUrl}/users/{$order->user_id}");
             $data['user'] = $userResponse->json()['data'] ?? null;
 
             return new OrderResource($data, 'berhasil', 'Order found');
@@ -140,7 +135,7 @@ class OrderController extends Controller
         // Get Product Info for price
         $productResponse = Http::withHeaders([
             'Authorization' => 'Bearer ' . $token
-        ])->get("http://127.0.0.1:8000/api/obat/{$request->product_id}");
+        ])->get("{$this->productServiceUrl}/obat/{$request->product_id}");
         $productData = $productResponse->json()['data'] ?? null;
 
         if (!$productData) {
@@ -149,11 +144,9 @@ class OrderController extends Controller
 
         if ($order->quantity > $request->quantity) {
             $qtt = $order->quantity - $request->quantity;
-            Http::withHeaders([
-                'Authorization' => 'Bearer ' . $token
-            ])->patch("http://127.0.0.1:8000/api/obat/{$request->product_id}/stock", [
-                        'stock' => $productData['stock'] + $qtt,
-                    ]);
+            // Kirim ke RabbitMQ untuk menambah kembali stok
+            \App\Jobs\UpdateProductStock::dispatch($request->product_id, $qtt, 'add')
+                ->onQueue('product_stock_queue');
         } else {
             $qtt = $request->quantity - $order->quantity;
 
@@ -161,11 +154,9 @@ class OrderController extends Controller
                 return new OrderResource(null, 'gagal', 'Stok obat tidak mencukupi untuk penambahan jumlah. Stok saat ini: ' . ($productData['stock'] ?? 0));
             }
 
-            Http::withHeaders([
-                'Authorization' => 'Bearer ' . $token
-            ])->patch("http://127.0.0.1:8000/api/obat/{$request->product_id}/stock", [
-                        'stock' => $productData['stock'] - $qtt,
-                    ]);
+            // Kirim ke RabbitMQ untuk mengurangi stok
+            \App\Jobs\UpdateProductStock::dispatch($request->product_id, $qtt, 'subtract')
+                ->onQueue('product_stock_queue');
         }
 
         $order->update([
@@ -196,6 +187,10 @@ class OrderController extends Controller
         if (!$order) {
             return new OrderResource(null, 'gagal', 'Order not found');
         }
+
+        // Kirim ke RabbitMQ untuk mengembalikan stok
+        \App\Jobs\UpdateProductStock::dispatch($order->product_id, $order->quantity, 'add')
+            ->onQueue('product_stock_queue');
 
         $order->delete();
         return new OrderResource(null, 'berhasil', 'Order deleted successfully');
