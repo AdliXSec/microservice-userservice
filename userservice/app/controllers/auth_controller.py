@@ -1,6 +1,7 @@
 from app.models.user_model import User, TokenBlocklist
 from app import db, bcrypt
 from flask_jwt_extended import create_access_token, get_jwt
+import os
 
 class AuthController:
     @staticmethod
@@ -19,25 +20,8 @@ class AuthController:
         db.session.add(new_user)
         db.session.commit()
 
-        # Kirim event ke RabbitMQ dalam format yang dimengerti Laravel
+        # Kirim event ke RabbitMQ
         from app.rabbitmq import send_to_queue
-        laravel_job = {
-            "uuid": str(os.urandom(16).hex()),
-            "displayName": "App\\Jobs\\HandleUserRegistered",
-            "job": "Illuminate\\Queue\\CallQueuedHandler@call",
-            "maxTries": None,
-            "maxExceptions": None,
-            "fail_on_timeout": False,
-            "backoff": None,
-            "timeout": None,
-            "data": {
-                "commandName": "App\\Jobs\\HandleUserRegistered",
-                "command": f'O:31:"App\\Jobs\\HandleUserRegistered":1:{{s:4:"data";a:2:{{s:5:"event";s:15:"user.registered";s:4:"data";a:4:{{s:2:"id";i:{new_user.id};s:4:"name";s:{len(new_user.name)}:"{new_user.name}";s:5:"email";s:{len(new_user.email)}:"{new_user.email}";s:4:"role";s:{len(new_user.role)}:"{new_user.role}";}}}}}}'
-            }
-        }
-        # Karena serialization PHP manual sangat rumit, kita kirim RAW JSON saja 
-        # dan nanti kita beri tahu Laravel untuk membacanya sebagai plain message.
-        
         user_event = {
             "event": "user.registered",
             "data": {
