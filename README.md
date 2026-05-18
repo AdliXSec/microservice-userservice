@@ -35,7 +35,7 @@ Pastikan Anda sudah menginstal:
 
    ```bash
    git clone https://github.com/AdliXSec/microservice-userservice
-   cd microservice
+   cd microservice-userservice
    ```
 
 2. Siapkan file konfigurasi (`.env`) untuk masing-masing service. Salin file `.env.example` menjadi `.env` di setiap folder:
@@ -60,16 +60,16 @@ Karena kita menggunakan _Volume Mapping_ (kode lokal terhubung langsung ke dalam
 2. Install dependensi PHP (Laravel) di dalam masing-masing container:
 
    ```bash
-   docker exec -it microservice-uiservice-1 composer install
-   docker exec -it microservice-orderservice-1 composer install
-   docker exec -it microservice-productservice-1 composer install
+   docker exec -it microservice-userservice-uiservice-1 composer install
+   docker exec -it microservice-userservice-orderservice-1 composer install
+   docker exec -it microservice-userservice-productservice-1 composer install
    ```
 
 3. Bersihkan cache konfigurasi untuk memastikan `.env` terbaru terbaca:
    ```bash
-   docker exec -it microservice-uiservice-1 php artisan config:clear
-   docker exec -it microservice-orderservice-1 php artisan config:clear
-   docker exec -it microservice-productservice-1 php artisan config:clear
+   docker exec -it microservice-userservice-uiservice-1 php artisan config:clear
+   docker exec -it microservice-userservice-orderservice-1 php artisan config:clear
+   docker exec -it microservice-userservice-productservice-1 php artisan config:clear
    ```
 
 ### Langkah 3: Database & Migrasi (Opsional/Jika Diperlukan)
@@ -78,8 +78,8 @@ _Jika project Anda memiliki file migrasi, Anda mungkin perlu menjalankannya. Jik
 
 ```bash
 # Contoh jika butuh migrasi:
-# docker exec -it microservice-orderservice-1 php artisan migrate
-# docker exec -it microservice-productservice-1 php artisan migrate
+# docker exec -it microservice-userservice-orderservice-1 php artisan migrate
+# docker exec -it microservice-userservice-productservice-1 php artisan migrate
 ```
 
 ---
@@ -94,20 +94,20 @@ Buka terminal baru untuk masing-masing perintah di bawah ini dan biarkan berjala
 Ini bertugas menangkap event pendaftaran user baru dari Python (Flask).
 
 ```bash
-docker exec -it microservice-orderservice-1 php artisan queue:work rabbitmq_users
+docker exec -it microservice-userservice-orderservice-1 php artisan queue:work rabbitmq_users
 ```
 
 **Terminal 2: Menjalankan Worker Potong Stok (Di ProductService)**
 Ini bertugas memotong stok obat secara otomatis setiap kali ada order baru.
 
 ```bash
-docker exec -it microservice-productservice-1 php artisan queue:work rabbitmq --queue=product_stock_queue
+docker exec -it microservice-userservice-productservice-1 php artisan queue:work rabbitmq --queue=product_stock_queue
 ```
 
 _(Opsional) Terminal 3: Tugas Default OrderService_
 
 ```bash
-docker exec -it microservice-orderservice-1 php artisan queue:work rabbitmq
+docker exec -it microservice-userservice-orderservice-1 php artisan queue:work rabbitmq
 ```
 
 ---
